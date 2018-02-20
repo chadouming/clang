@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2034,SC1090
+#
+# Helper functions
+#
+# Copyright (C) 2016-2018 Nathan Chancellor
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>
+
+
+###############
+#             #
+#  VARIABLES  #
+#             #
+###############
+
+# WHAT OS ARE WE ON?
+OS=$(UNAME=$(uname); echo "${UNAME,,}")
+# GNU READLINK IS NEEDED FOR SCRIPTS_FOLDER
+if [[ ${OS} = "darwin" ]]; then
+    alias readlink=greadlink
+fi
+
+# LOCATION OF SCRIPTS FOLDER
+SCRIPTS_FOLDER=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+BIN_FOLDER=${SCRIPTS_FOLDER}/bin
+
+# COMMON LOCATIONS AMONGST SCRIPTS
+KERNEL_FOLDER=${HOME}/kernels
+MISC_FOLDER=${HOME}/misc
+REPO_FOLDER=${HOME}/repos
+ROM_FOLDER=${HOME}/roms
+TC_FOLDER=${HOME}/toolchains
+WEB_FOLDER=${HOME}/web
+
+# COLORS
+BLINK_RED="\033[05;31m"
+BLUE="\033[01;34m"
+BOLD="\033[1m"
+GRN="\033[01;32m"
+RED="\033[01;31m"
+RST="\033[0m"
+YLW="\033[01;33m"
+
+# MAKE THREADS
+JOBS_FLAG="-j8"
+
+###############
+#             #
+#  FUNCTIONS  #
+#             #
+###############
+
+# ALIAS FOR ECHO TO PRINT ESCAPE CODES
+function echo() {
+    command echo -e "$@"
+}
+
+# PRINTS A FORMATTED HEADER TO POINT OUT WHAT IS BEING DONE TO THE USER
+function header() {
+    if [[ -n ${2} ]]; then
+        COLOR=${2}
+    else
+        COLOR=${RED}
+    fi
+    echo "${COLOR}"
+    echo "====$(for i in $(seq ${#1}); do echo "=\c"; done)===="
+    echo "==  ${1}  =="
+    echo "====$(for i in $(seq ${#1}); do echo "=\c"; done)===="
+    echo "${RST}"
+}
+
+# FORMATS THE TIME
+function format_time() {
+    MINS=$(((${1} - ${2}) / 60))
+    SECS=$(((${1} - ${2}) % 60))
+    if [[ ${MINS} -ge 60 ]]; then
+        HOURS=$((MINS / 60))
+        MINS=$((MINS % 60))
+    fi
+
+    if [[ ${HOURS} -eq 1 ]]; then
+        TIME_STRING+="1 HOUR, "
+    elif [[ ${HOURS} -ge 2 ]]; then
+        TIME_STRING+="${HOURS} HOURS, "
+    fi
+
+    if [[ ${MINS} -eq 1 ]]; then
+        TIME_STRING+="1 MINUTE"
+    else
+        TIME_STRING+="${MINS} MINUTES"
+    fi
+
+    if [[ ${SECS} -eq 1 && -n ${HOURS} ]]; then
+        TIME_STRING+=", AND 1 SECOND"
+    elif [[ ${SECS} -eq 1 && -z ${HOURS} ]]; then
+        TIME_STRING+=" AND 1 SECOND"
+    elif [[ ${SECS} -ne 1 && -n ${HOURS} ]]; then
+        TIME_STRING+=", AND ${SECS} SECONDS"
+    elif [[ ${SECS} -ne 1 && -z ${HOURS} ]]; then
+        TIME_STRING+=" AND ${SECS} SECONDS"
+    fi
+
+    echo "${TIME_STRING}"
+}
+
+# PRINTS AN ERROR IN BOLD RED
+function display_error() {
+    echo
+    echo "${RED}${1}${RST}"
+    if [[ -z ${2} ]]; then
+        echo
+    fi
+}
+
+# PRINTS AN ERROR IN BOLD RED
+function die() {
+    if [[ ${TG} ]]; then
+        # INFO MUST BE RESOURCED SO PUBLIC CHATS DON'T GET NOTIFIED
+        load_botinfo
+        {
+            echo "\`\`\`"
+            echo "An error was detected while running the following command:"
+            echo
+            echo "$(basename "${0}") ${PARAMS}"
+            echo
+            echo "The error was:"
+            echo
+            echo "$*"
+            echo "\`\`\`"
+        } > /tmp/death-tg-msg
+        notify "$(cat /tmp/death-tg-msg)"
+    fi
+
+    display_error "$@"
+    exit
+}
+
+# PRINTS A WARNING IN BOLD YELLOW
+function warn() {
+    echo
+    echo "${YLW}${1}${RST}"
+    if [[ -z ${2} ]]; then
+        echo
+    fi
+}
+
+# ENFORCES THE VALUE NEEDED FOR TWO-PART FLAGS
+function enforce_value() {
+    if [[ $# -lt 1 ]]; then
+        die "A additional value is needed for one of the flags passed to this script!"
+    fi
+}
+
+# ADD A REMOTE IF IT DOESN'T EXIST
+function add_remote() {
+    if ! git remote | grep -q -m 1 "${1}"; then
+        git remote add "${1}" "${2}"
+    fi
+}
+
+# CONVERT A FILE LOCATION TO WEB LINK
+function web_link() {
+    echo "${1}" | sed s/"$(echo "${WEB_FOLDER}" | sed 's/\//\\\//g')"/http:\\/\\/nchancellor.net/
+}
+
+# SET UP A VIRTUAL ENVIRONMENT FOR PYTHON
+function mkavenv {
+    virtualenv2 "${HOME}/venv"
+    source "${HOME}/venv/bin/activate"
+}
+
+# REMOVE VIRTUAL ENVIRONMENT
+function rmvenv {
+    deactivate
+    rm -rf "${HOME}/venv"
+}
+
+# SOURCE TELEGRAM BOT INFORMATION
+function load_botinfo() {
+    if [[ -f ${HOME}/.botinfo ]]; then
+        source ~/.botinfo
+    fi
+}
+
+load_botinfo
+
+# REQUIRE A PARAMETER TO OPT OUT OF MAC_CHECK
+if [[ $# -lt 1 && ${OS} = "darwin" ]]; then
+    die "Wrong window! ;)"
+fi
+
+# TELEGRAM NOTIFIER FUNCTION
+function notify() {
+    if [[ -z ${TOKEN} ]]; then
+        display_error "notify() was called but there was no token!"
+        return 1
+    fi
+
+    if [[ -z ${CHAT_ID} ]]; then
+        display_error "notify() was called but there was no chat ID!"
+        return 1
+    fi
+
+    curl -s -X POST https://api.telegram.org/bot${TOKEN}/sendMessage -d chat_id=${CHAT_ID} -d parse_mode="Markdown" -d text="$@" 1>/dev/null
+}
