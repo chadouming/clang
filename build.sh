@@ -104,6 +104,10 @@ function sync() {
         esac
     fi
 
+    if [[ ${FOLDER} =~ "clang-tools-extra" ]]; then
+        FOLDER="clang/tools/extra"
+    fi
+
     if [[ ! -d ${FOLDER} ]]; then
         git clone "${URL}" -b "${BRANCH}" "${FOLDER}"
     else
@@ -134,6 +138,7 @@ function sync_all() {
     sync clang
     sync lld
     sync polly
+    sync clang-tools-extra
 
     mkdir -p "${LLVM_FOLDER}/projects"
     cd "${LLVM_FOLDER}/projects" || die "Error creating projects folder!"
